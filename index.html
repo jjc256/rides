@@ -2,22 +2,93 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Theme Park Ride Optimizer</title>
+  <title>Theme Park Ride Order Optimizer</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h2 { margin-top: 40px; }
     .ride { margin-bottom: 10px; }
     .land { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
     .hidden { display: none; }
+    #landLayoutConfig {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      margin: 20px 0;
+      padding: 10px;
+      border: 1px solid #aaa;
+    }
+    #landDropdowns {
+      margin-right: 20px;
+      text-align: right;
+    }
+    #landDropdowns label {
+      display: block;
+      margin-bottom: 10px;
+    }
+    #landLayoutVisualization {
+      position: relative;
+      width: 300px;
+      height: 300px;
+      border: 1px solid #aaa;
+      border-radius: 50%;
+    }
+    #landLayoutVisualization .center-land {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      background: #ffeb3b;
+      padding: 5px 10px;
+      border: 1px solid #999;
+      border-radius: 4px;
+    }
+    #landLayoutVisualization .peripheral-land {
+      position: absolute;
+      background: #c8e6c9;
+      padding: 3px 8px;
+      border: 1px solid #777;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
-  <h1>Theme Park Ride Optimizer</h1>
+  <h1>Theme Park Ride Order Optimizer (Magic Kingdom)</h1>
+
+  <p>This ride optimization was implemented for Walt Disney World's Magic Kingdom, but it could easily be used for any park by swapping APIs.</p>
+
+  <p>This app's live wait time data and ride/land names are <a  target="_blank" href="https://queue-times.com/en-US">Powered by Queue-Times.com</a>, so all you have to do is swap out the API although you need to use a Cloudflare (or other) worker to bypass CORS restrictions.</p>
+
+  <p>If you swap to a different park, in order to support pre-park planning, you should add average wait time data in .txt format <a target="_blank" href="https://github.com/jjc256/rides">like I do</a>.</p>
+
+  <!-- New Land Layout Configuration: dropdowns on left, visualization on right -->
+  <div id="landLayoutConfig">
+    <div id="landDropdowns">
+      <label>
+        Center Land:
+        <select id="centerLand"></select>
+      </label>
+      <div id="peripheralDropdowns">
+        <!-- Peripheral dropdowns will be added here -->
+      </div>
+    </div>
+    <div id="landLayoutVisualization">
+      <!-- Graphical preview of layout -->
+    </div>
+  </div>
+
+  <div>
+    <label><input type="radio" name="mode" value="pre" checked> Pre-Park Planning</label>
+    <label><input type="radio" name="mode" value="live"> In-Park Planning</label>
+  </div>
+
   <p>Rate how much you like each ride (1 to 10), then click "Plan My Day" to get your recommended ride order based on current wait times.</p>
 
   <div id="rideRatings">
     <p>Loading ride data...</p>
   </div>
+
+  <label>Start Time: <input type="time" id="startTime" value="09:00"></label>
+  <label>End Time: <input type="time" id="endTime" value="17:00"></label>
 
   <button id="planButton" disabled>Plan My Day</button>
 
@@ -26,30 +97,162 @@
 
   <script>
     // Configuration constants
-    const TOTAL_TIME = 480; // minutes available (8 hours)
     const RIDE_DURATION = 5;
-    const WALK_SAME_LAND = 5;
+    const WALK_SAME_LAND = 10;
     const WALK_DIFF_LAND = 15;
     let ridesData = [];
     let rideRatings = {};
     let data = { lands: [] };
+    let landLayout = { center: '', peripherals: [] };
 
+    // Helper to load local averages and return a map: { [rideName]: avgWait }
+    function loadAveragesMap() {
+      return fetch("/magic_kingdom_averages.txt")
+        .then(response => response.text())
+        .then(dataText => {
+          const averages = {};
+          const lines = dataText.trim().split("\n");
+          lines.forEach(line => {
+            const [rideName, avgStr] = line.split(", ");
+            averages[rideName] = parseInt(avgStr, 10);
+          });
+          console.log("Loaded local averages:", averages);
+          return averages;
+        });
+    }
+
+    // Updated fetchData: always fetch API lands, then possibly override wait_time with local averages
     function fetchData() {
+      const mode = document.querySelector('input[name="mode"]:checked').value;
       fetch("https://rides.jjchen256.workers.dev/")
         .then(response => response.json())
         .then(apiData => {
           data = apiData;
-          loadData();
+          if (mode === "pre") {
+            return loadAveragesMap().then(avgMap => {
+              data.lands.forEach(land => {
+                land.rides.forEach(ride => {
+                  if (avgMap[ride.name] !== undefined) {
+                    ride.wait_time = avgMap[ride.name];
+                  } else {
+                    ride.wait_time = 5; // Default wait time for rides not in the averages map
+                  }
+                  ride.is_open = true; // Ensure all rides are considered open in pre-park mode
+                });
+              });
+            });
+          }
         })
         .catch(err => {
           console.error("Error fetching data:", err);
+        })
+        .finally(() => {
+          // Whether or not we have local overrides, proceed.
+          initLandLayout();
+          drawLandLayout();
           loadData();
         });
+    }
+
+    function initLandLayout() {
+      // Populate center dropdown from fetched lands with no default selection.
+      const centerSelect = document.getElementById("centerLand");
+      centerSelect.innerHTML = `<option value="">Select center land</option>`;
+      data.lands.forEach(land => {
+        const opt = document.createElement("option");
+        opt.value = land.name;
+        opt.textContent = land.name;
+        centerSelect.appendChild(opt);
+      });
+      // Do not assign a default; user must select.
+      centerSelect.addEventListener("change", () => {
+        landLayout.center = centerSelect.value;
+        updatePeripheralDropdowns();
+        drawLandLayout();
+      });
+      updatePeripheralDropdowns();
+    }
+
+    function updatePeripheralDropdowns() {
+      const container = document.getElementById("peripheralDropdowns");
+      container.innerHTML = "";
+      if (!landLayout.center) {
+        container.textContent = "Please select a center land first.";
+        return;
+      }
+      // Build available peripheral lands (all lands except the selected center).
+      const peripheralLands = data.lands
+        .map(land => land.name)
+        .filter(name => name !== landLayout.center);
+      // Initialize peripherals as empty strings for each slot if not already set.
+      if (landLayout.peripherals.length !== peripheralLands.length) {
+        landLayout.peripherals = peripheralLands.map(() => "");
+      }
+      peripheralLands.forEach((_, i) => {
+        const label = document.createElement("label");
+        label.textContent = `Peripheral ${i + 1}: `;
+        const select = document.createElement("select");
+        // Add empty default option.
+        select.innerHTML = `<option value="">Select peripheral land</option>`;
+        peripheralLands.forEach(name => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          select.appendChild(opt);
+        });
+        // Set the select's current value from landLayout.peripherals.
+        select.value = landLayout.peripherals[i];
+        select.addEventListener("change", () => {
+          const selects = document.querySelectorAll("#peripheralDropdowns select");
+          const newOrder = [];
+          selects.forEach(sel => newOrder.push(sel.value));
+          landLayout.peripherals = newOrder;
+          drawLandLayout();
+        });
+        label.appendChild(select);
+        container.appendChild(label);
+      });
+      // Immediately update the layout drawing even if none are selected.
+      drawLandLayout();
+    }
+
+    // Revised drawLandLayout: assign class "center-land" to the first element.
+    function drawLandLayout() {
+      const container = document.getElementById("landLayoutVisualization");
+      container.innerHTML = "";
+      // Combine central land and peripheral selections.
+      const allLands = [landLayout.center, ...landLayout.peripherals];
+      const total = allLands.length;
+      allLands.forEach((land, i) => {
+        const div = document.createElement("div");
+        // Use "center-land" class for index 0; others "peripheral-land"
+        div.className = (i === 0) ? "center-land" : "peripheral-land";
+        div.textContent = land || (i === 0 ? "Center Land" : `Peripheral ${i}`);
+        // Calculate angle so that index 0 (central land) is fixed at 3π/2.
+        const angle = (3 * Math.PI/2 + i * (2 * Math.PI / total)) % (2 * Math.PI);
+        div.style.left = (50 + 40 * Math.cos(angle)) + "%";
+        div.style.top  = (50 - 40 * Math.sin(angle)) + "%";
+        div.style.transform = "translate(-50%, -50%)";
+        container.appendChild(div);
+      });
+    }
+
+    // Helper function uses current layout to determine adjacency.
+    function isAdjacent(current, target) {
+      if (current === target) return true;
+      if (current === landLayout.center || target === landLayout.center) return true;
+      const idxA = landLayout.peripherals.indexOf(current);
+      const idxB = landLayout.peripherals.indexOf(target);
+      if (idxA === -1 || idxB === -1) return false;
+      const n = landLayout.peripherals.length + 1 ;
+      return (Math.abs(idxA - idxB) === 1 || Math.abs(idxA - idxB) === n - 1);
     }
 
     function loadData() {
       const container = document.getElementById("rideRatings");
       container.innerHTML = "";
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+
       data.lands.forEach(land => {
         const landDiv = document.createElement("div");
         landDiv.className = "land";
@@ -58,7 +261,7 @@
         landDiv.appendChild(landTitle);
 
         land.rides.forEach(ride => {
-          if (ride.is_open) {
+          if (ride.is_open || mode === "pre") { // Show all rides in pre-park mode
             ridesData.push({
               id: ride.id,
               name: ride.name,
@@ -69,7 +272,9 @@
 
             const rideDiv = document.createElement("div");
             rideDiv.className = "ride";
-            rideDiv.innerHTML = `<strong>${ride.name}</strong> (Wait: ${ride.wait_time} mins) <br>
+            // Only show wait time in live mode
+            const waitText = (mode === "pre") ? "" : `(Wait: ${ride.wait_time} mins)`;
+            rideDiv.innerHTML = `<strong>${ride.name}</strong> ${waitText}<br>
               Your Rating: <input type="range" min="1" max="10" value="5" id="rating-${ride.id}">
               <span id="rating-value-${ride.id}">5</span>`;
             landDiv.appendChild(rideDiv);
@@ -89,20 +294,55 @@
       document.getElementById("planButton").disabled = false;
     }
 
+    function parseTime(t) {
+      const [hh, mm] = t.split(":").map(Number);
+      return hh * 60 + mm;
+    }
+
+    // New function to estimate wait time based on average & time-of-day.
+    function estimateWaitTime(avg, currentAbsolute) {
+      // currentAbsolute: minutes since midnight; 9am = 540, 10pm = 1320.
+      let t = currentAbsolute - 540; // minutes past 9am.
+      if(t < 0) t = 0;
+      if(t > 780) t = 780; // clamp at 10pm.
+      let factor = 1;
+      if(t <= 480){ // 9am to 5pm
+        // linearly increase factor from 0.1 at 9am to 1 at 5pm.
+        factor = 0.1 + (0.9 * (t / 480));
+      } else { // 5pm to 10pm
+        // from 1 at 5pm to 1.3 at 10pm.
+        factor = 1 + 0.3 * ((t - 480) / 300);
+      }
+      return avg * factor;
+    }
+
     document.getElementById("planButton").addEventListener("click", () => {
-      const availableRides = ridesData.map(ride => Object.assign({}, ride));
+      const start = parseTime(document.getElementById("startTime").value); // minutes from midnight.
+      const end = parseTime(document.getElementById("endTime").value);
+      const totalTime = end - start;
       let currentTime = 0;
       let currentLand = null;
       const plannedOrder = [];
+      let availableRides = ridesData.slice();
 
-      while (currentTime < TOTAL_TIME) {
+      while (currentTime < totalTime) {
         let bestRide = null;
         let bestScore = -Infinity;
         let bestCost = 0;
+
         availableRides.forEach(ride => {
-          const walkTime = (!currentLand || ride.land === currentLand) ? WALK_SAME_LAND : WALK_DIFF_LAND;
-          const totalCost = walkTime + ride.wait_time + RIDE_DURATION;
-          if (currentTime + totalCost > TOTAL_TIME) {
+          // Skip if last 3 rides are the same.
+          if (plannedOrder.length >= 3) {
+            const last3 = plannedOrder.slice(-3);
+            if (last3.every(r => r.name === ride.name)) {
+              return;
+            }
+          }
+          const walkTime = (!currentLand || isAdjacent(currentLand, ride.land)) ? WALK_SAME_LAND : WALK_DIFF_LAND;
+          // Estimate wait time based on planned time (start + currentTime).
+          const estimatedWait = estimateWaitTime(ride.wait_time, start + currentTime);
+          const totalCost = walkTime + estimatedWait + RIDE_DURATION;
+          if (currentTime + totalCost > totalTime) {
             return;
           }
           const happiness = rideRatings[ride.id] || 5;
@@ -116,12 +356,18 @@
 
         if (!bestRide) break;
 
+        const walkTime = (!currentLand || isAdjacent(currentLand, bestRide.land)) ? WALK_SAME_LAND : WALK_DIFF_LAND;
+        const lineTime = currentTime + walkTime;
+        const estimatedWait = estimateWaitTime(bestRide.wait_time, start + lineTime);
+
         plannedOrder.push({
           name: bestRide.name,
           land: bestRide.land,
           cost: bestCost,
-          wait_time: bestRide.wait_time,
-          rating: rideRatings[bestRide.id]
+          walk_time: walkTime,
+          wait_time: estimatedWait,
+          rating: rideRatings[bestRide.id],
+          lineTime: lineTime
         });
         currentTime += bestCost;
         currentLand = bestRide.land;
@@ -135,18 +381,27 @@
       const orderList = document.getElementById("rideOrder");
       orderList.innerHTML = "";
       plannedOrder.forEach(ride => {
+        const actualLineTime = start + Math.round(ride.lineTime);
+        const lineHour = Math.floor(actualLineTime / 60);
+        const lineMin = actualLineTime % 60;
         const li = document.createElement("li");
-        li.innerHTML = `<strong>${ride.name}</strong> in ${ride.land} 
-                        (Rating: ${ride.rating}, Wait: ${ride.wait_time} mins, Total cost: ${ride.cost} mins)`;
+        li.innerHTML = `<strong>${ride.name}</strong> in ${ride.land}, 
+          Line-Up Time: ${lineHour.toString().padStart(2, "0")}:${lineMin.toString().padStart(2, "0")}
+          (Rating: ${ride.rating}, Walk Time: ${Math.round(ride.walk_time)} mins, Actual Wait: ${Math.round(ride.wait_time)} mins, Total Cost: ${Math.round(ride.cost)} mins)`;
         orderList.appendChild(li);
       });
 
-      const remainingTime = TOTAL_TIME - plannedOrder.reduce((sum, r) => sum + r.cost, 0);
+      const remainingTime = totalTime - plannedOrder.reduce((sum, r) => sum + Math.round(r.cost), 0);
       const li = document.createElement("li");
       li.style.fontWeight = "bold";
       li.textContent = `Remaining Time: ${remainingTime} minutes`;
       orderList.appendChild(li);
-    });
+        });
+
+  // Add event listener to radio buttons to re-fetch data and re-render divs and sliders
+  document.querySelectorAll('input[name="mode"]').forEach(radio => {
+    radio.addEventListener("change", fetchData);
+  });
 
     document.addEventListener("DOMContentLoaded", fetchData);
   </script>
