@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Theme Park Ride Optimizer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h2 { margin-top: 40px; }
+    .ride { margin-bottom: 10px; }
+    .land { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Theme Park Ride Optimizer</h1>
+  <p>Rate how much you like each ride (1 to 10), then click "Plan My Day" to get your recommended ride order based on current wait times.</p>
+
+  <div id="rideRatings">
+    <p>Loading ride data...</p>
+  </div>
+
+  <button id="planButton" disabled>Plan My Day</button>
+
+  <h2>Your Recommended Ride Order:</h2>
+  <ol id="rideOrder"></ol>
+
+  <script>
+    // Configuration constants
+    const TOTAL_TIME = 480; // minutes available (8 hours)
+    const RIDE_DURATION = 5;
+    const WALK_SAME_LAND = 5;
+    const WALK_DIFF_LAND = 15;
+    let ridesData = [];
+    let rideRatings = {};
+    let data = { lands: [] };
+
+    function fetchData() {
+      fetch("https://rides.jjchen256.workers.dev/")
+        .then(response => response.json())
+        .then(apiData => {
+          data = apiData;
+          loadData();
+        })
+        .catch(err => {
+          console.error("Error fetching data:", err);
+          loadData();
+        });
+    }
+
+    function loadData() {
+      const container = document.getElementById("rideRatings");
+      container.innerHTML = "";
+      data.lands.forEach(land => {
+        const landDiv = document.createElement("div");
+        landDiv.className = "land";
+        const landTitle = document.createElement("h3");
+        landTitle.textContent = land.name;
+        landDiv.appendChild(landTitle);
+
+        land.rides.forEach(ride => {
+          if (ride.is_open) {
+            ridesData.push({
+              id: ride.id,
+              name: ride.name,
+              wait_time: ride.wait_time,
+              land: land.name,
+              last_updated: ride.last_updated
+            });
+
+            const rideDiv = document.createElement("div");
+            rideDiv.className = "ride";
+            rideDiv.innerHTML = `<strong>${ride.name}</strong> (Wait: ${ride.wait_time} mins) <br>
+              Your Rating: <input type="range" min="1" max="10" value="5" id="rating-${ride.id}">
+              <span id="rating-value-${ride.id}">5</span>`;
+            landDiv.appendChild(rideDiv);
+
+            rideRatings[ride.id] = 5;
+
+            const slider = rideDiv.querySelector(`#rating-${ride.id}`);
+            const ratingValue = rideDiv.querySelector(`#rating-value-${ride.id}`);
+            slider.addEventListener("input", () => {
+              rideRatings[ride.id] = parseInt(slider.value);
+              ratingValue.textContent = slider.value;
+            });
+          }
+        });
+        container.appendChild(landDiv);
+      });
+      document.getElementById("planButton").disabled = false;
+    }
+
+    document.getElementById("planButton").addEventListener("click", () => {
+      const availableRides = ridesData.map(ride => Object.assign({}, ride));
+      let currentTime = 0;
+      let currentLand = null;
+      const plannedOrder = [];
+
+      while (currentTime < TOTAL_TIME) {
+        let bestRide = null;
+        let bestScore = -Infinity;
+        let bestCost = 0;
+        availableRides.forEach(ride => {
+          const walkTime = (!currentLand || ride.land === currentLand) ? WALK_SAME_LAND : WALK_DIFF_LAND;
+          const totalCost = walkTime + ride.wait_time + RIDE_DURATION;
+          if (currentTime + totalCost > TOTAL_TIME) {
+            return;
+          }
+          const happiness = rideRatings[ride.id] || 5;
+          const score = happiness / totalCost;
+          if (score > bestScore) {
+            bestScore = score;
+            bestRide = ride;
+            bestCost = totalCost;
+          }
+        });
+
+        if (!bestRide) break;
+
+        plannedOrder.push({
+          name: bestRide.name,
+          land: bestRide.land,
+          cost: bestCost,
+          wait_time: bestRide.wait_time,
+          rating: rideRatings[bestRide.id]
+        });
+        currentTime += bestCost;
+        currentLand = bestRide.land;
+
+        const index = availableRides.findIndex(r => r.id === bestRide.id);
+        if (index !== -1) {
+          availableRides.splice(index, 1);
+        }
+      }
+
+      const orderList = document.getElementById("rideOrder");
+      orderList.innerHTML = "";
+      plannedOrder.forEach(ride => {
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>${ride.name}</strong> in ${ride.land} 
+                        (Rating: ${ride.rating}, Wait: ${ride.wait_time} mins, Total cost: ${ride.cost} mins)`;
+        orderList.appendChild(li);
+      });
+
+      const remainingTime = TOTAL_TIME - plannedOrder.reduce((sum, r) => sum + r.cost, 0);
+      const li = document.createElement("li");
+      li.style.fontWeight = "bold";
+      li.textContent = `Remaining Time: ${remainingTime} minutes`;
+      orderList.appendChild(li);
+    });
+
+    document.addEventListener("DOMContentLoaded", fetchData);
+  </script>
+</body>
+</html>
