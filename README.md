@@ -4,7 +4,7 @@ This project is a web application designed to optimize the order of rides at a t
 
 ## Features
 
-- **Pre-Park Planning Mode**: Plan your day in advance using average wait times.
+- **Pre-Park Planning Mode**: Plan your day in advance using average wait times adjusted according to time of day.
 - **In-Park Planning Mode**: Get real-time ride recommendations based on current wait times.
 - **Customizable Layout**: Configure the layout of lands and rides visually.
 - **User Ratings**: Rate rides to personalize your experience.
