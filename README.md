@@ -1,10 +1,10 @@
 # Theme Park Ride Order Optimizer
 
-This project is a web application designed to optimize the order of rides at a theme park, specifically Walt Disney World's Magic Kingdom. The application can be adapted for other parks by swapping APIs and providing average wait time data.
+This project is a web application designed to optimize the order of rides at a theme park given user ride preferences and wait time data.
 
 ## Features
 
-- **Pre-Park Planning Mode**: Plan your day in advance using average wait times adjusted according to time of day.
+- **Pre-Park Planning Mode**: Plan your day in advance using average wait times adjusted according to time of day. In order to use pre-park planning mode for a park other than Magic Kingdom, upload a `park_averages.txt`.
 - **In-Park Planning Mode**: Get real-time ride recommendations based on current wait times.
 - **Customizable Layout**: Configure the layout of lands and rides visually.
 - **User Ratings**: Rate rides to personalize your experience.

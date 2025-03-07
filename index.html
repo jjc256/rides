@@ -49,16 +49,24 @@
       border: 1px solid #777;
       border-radius: 4px;
     }
+    #parkSelection {
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
-  <h1>Theme Park Ride Order Optimizer (Magic Kingdom)</h1>
+  <h1>Theme Park Ride Order Optimizer</h1>
 
-  <p>This ride optimization was implemented for Walt Disney World's Magic Kingdom, but it could easily be used for any park by swapping APIs.</p>
+  <p>First, choose a park, then choose the approximate layout of the lands for walking time estimates used in the algorithm. Then, rate each ride, and your optimal ride order will be calculated.</p>
 
-  <p>This app's live wait time data and ride/land names are <a  target="_blank" href="https://queue-times.com/en-US">Powered by Queue-Times.com</a>, so all you have to do is swap out the API although you need to use a Cloudflare (or other) worker to bypass CORS restrictions.</p>
+  <p>This app's live wait time data and park/ride/land data are <a  target="_blank" href="https://queue-times.com/en-US">Powered by Queue-Times.com</a> although I use a Cloudflare worker to bypass CORS restrictions.</p>
 
-  <p>If you swap to a different park, in order to support pre-park planning, you should add average wait time data in .txt format <a target="_blank" href="https://github.com/jjc256/rides">like I do</a>.</p>
+  <p>If you use a park other than Magic Kingdom, in order to support pre-park planning, you should add average wait time data in .txt format like I do <a target="_blank" href="https://github.com/jjc256/rides/blob/main/magic_kingdom_averages.txt">here</a>.</p>
+
+  <div id="parkSelection">
+    <label for="parkDropdown">Select Park:</label>
+    <select id="parkDropdown"></select>
+  </div>
 
   <!-- New Land Layout Configuration: dropdowns on left, visualization on right -->
   <div id="landLayoutConfig">
@@ -104,6 +112,7 @@
     let rideRatings = {};
     let data = { lands: [] };
     let landLayout = { center: '', peripherals: [] };
+    let parksData = [];
 
     // Helper to load local averages and return a map: { [rideName]: avgWait }
     function loadAveragesMap() {
@@ -124,7 +133,11 @@
     // Updated fetchData: always fetch API lands, then possibly override wait_time with local averages
     function fetchData() {
       const mode = document.querySelector('input[name="mode"]:checked').value;
-      fetch("https://rides.jjchen256.workers.dev/")
+      const parkId = document.getElementById("parkDropdown").value;
+      if (!parkId) {
+        return;
+      }
+      fetch(`https://rides.jjchen256.workers.dev/parks/${parkId}`)
         .then(response => response.json())
         .then(apiData => {
           data = apiData;
@@ -151,6 +164,27 @@
           initLandLayout();
           drawLandLayout();
           loadData();
+        });
+    }
+
+    function loadParks() {
+      return fetch("https://rides.jjchen256.workers.dev/")
+        .then(response => response.json())
+        .then(data => {
+          parksData = data;
+          const parkDropdown = document.getElementById("parkDropdown");
+          parkDropdown.innerHTML = `<option value="">Select a park</option>`;
+          data.forEach(company => {
+            company.parks.forEach(park => {
+              const opt = document.createElement("option");
+              opt.value = park.id;
+              opt.textContent = `${company.name} - ${park.name}`;
+              parkDropdown.appendChild(opt);
+            });
+          });
+        })
+        .catch(err => {
+          console.error("Error loading parks:", err);
         });
     }
 
@@ -403,7 +437,12 @@
     radio.addEventListener("change", fetchData);
   });
 
-    document.addEventListener("DOMContentLoaded", fetchData);
+    document.addEventListener("DOMContentLoaded", () => {
+      loadParks().then(fetchData);
+    });
+
+    document.getElementById("parkDropdown").addEventListener("change", fetchData);
+
   </script>
 </body>
 </html>
