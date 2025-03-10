@@ -114,6 +114,10 @@
     let landLayout = { center: '', peripherals: [] };
     let parksData = [];
 
+    document.querySelectorAll('input[name="mode"]').forEach(radio => {
+      radio.addEventListener("change", fetchData);
+    });
+
     // Helper to load local averages and return a map: { [rideName]: avgWait }
     function loadAveragesMap() {
       return fetch("./magic_kingdom_averages.txt")
@@ -283,6 +287,7 @@
     }
 
     function loadData() {
+      ridesData = [];
       const container = document.getElementById("rideRatings");
       container.innerHTML = "";
       const mode = document.querySelector('input[name="mode"]:checked').value;
@@ -293,6 +298,7 @@
         const landTitle = document.createElement("h3");
         landTitle.textContent = land.name;
         landDiv.appendChild(landTitle);
+
 
         land.rides.forEach(ride => {
           if (ride.is_open || mode === "pre") { // Show all rides in pre-park mode
