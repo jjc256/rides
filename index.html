@@ -116,7 +116,7 @@
 
     // Helper to load local averages and return a map: { [rideName]: avgWait }
     function loadAveragesMap() {
-      return fetch("/magic_kingdom_averages.txt")
+      return fetch("./magic_kingdom_averages.txt")
         .then(response => response.text())
         .then(dataText => {
           const averages = {};
